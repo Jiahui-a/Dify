@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urlencode, urljoin
 
 import requests
 import urllib3
@@ -156,8 +156,7 @@ def fetch_latest_events(config: ApiConfig) -> list[dict[str, Any]]:
                 "$orderby": "begintime desc",
                 "$filter": filter_expr,
             }
-            query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-            url = f"{base_url}?{query_string}"
+            url = f"{base_url}?{urlencode(params)}"
             print(f"[step1] 第 {page_no} 页: $skip={skip}")
             print(f"[step1] 请求: {url}")
 
