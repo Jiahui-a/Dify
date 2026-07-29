@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "andon-fetcher"
-version = "0.1.0"
-description = "Fetch Andon raw records via OData + API Key"
+version = "0.2.0"
+description = "Fetch Andon OData events and build Dify knowledge-base CSV"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "requests>=2.31.0",
   "python-dotenv>=1.0.0",
-  "pandas>=2.1.0",
   "click>=8.1.0",
+  "urllib3>=2.0.0",
 ]
 
 [project.optional-dependencies]

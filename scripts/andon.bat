@@ -1,5 +1,4 @@
 @echo off
-REM 在仓库根目录 Dify 下运行本脚本，或先 cd 到 Dify
 cd /d "%~dp0.."
 
 if not exist ".venv\Scripts\python.exe" (

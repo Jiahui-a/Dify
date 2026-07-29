@@ -1,4 +1,4 @@
-"""单元测试：字段映射与 OData 分页。"""
+"""单元测试：清洗与 OData 解析（不连公司内网）。"""
 
 from __future__ import annotations
 
@@ -6,147 +6,125 @@ from pathlib import Path
 
 import responses
 
-from andon_fetcher.config import ApiConfig, CORE_FIELDS, load_config
-from andon_fetcher.field_mapper import canonicalize_record
-from andon_fetcher.odata_client import ODataClient
+from andon_fetcher.cleaner import AndonEventCleaner, deduplicate_records
+from andon_fetcher.config import ApiConfig, CleanConfig, load_config
+from andon_fetcher.fetch import extract_records, fetch_latest_events
+from andon_fetcher.http_session import build_headers
+from andon_fetcher.pipeline import clean_records, export_knowledge_base
 
 
-def test_canonicalize_record_aliases() -> None:
-    raw = {
-        "LineName": "L1",
-        "station_name": "ST-01",
-        "FaultType": "设备故障",
-        "EventName": "急停",
-        "BeginTime": "2026-07-01T08:00:00Z",
-        "IsChangeEquipment": True,
-        "DownTimeDuration": 120,
-        "@odata.etag": "W/\"1\"",
-    }
-    mapped = canonicalize_record(raw)
-    assert mapped["linename"] == "L1"
-    assert mapped["stationname"] == "ST-01"
-    assert mapped["faulttype"] == "设备故障"
-    assert mapped["eventsname"] == "急停"
-    assert mapped["begintime"] == "2026-07-01T08:00:00Z"
-    assert mapped["ischangequipment"] is True
-    assert mapped["dowtimeduration"] == 120
-    assert set(CORE_FIELDS).issubset(mapped.keys())
-
-
-def test_api_config_defaults_and_aliases(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.delenv("ANDON_ODATA_BASE_URL", raising=False)
-    monkeypatch.delenv("ANDON_ENTITY_SET", raising=False)
-    monkeypatch.delenv("ANDON_ENDPOINT", raising=False)
-    monkeypatch.delenv("ANDON_API_KEY", raising=False)
-    # 无 .env 时使用 ApiConfig 默认值
+def test_api_config_defaults(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    config = load_config()
-    assert config.base_url == "http://gongsi.com:8092/andon"
-    assert config.endpoint == "o_d_andon_eventsrawdata_cur"
-    assert config.entity_set == "o_d_andon_eventsrawdata_cur"
-    assert config.auth_header == "ABC"
-    assert config.page_size == config.top_n == 500
-    assert config.verify_ssl is False
-    assert config.timeout_seconds == 120
-    assert config.entity_url.endswith("/andon/o_d_andon_eventsrawdata_cur")
+    for key in (
+        "ANDON_ODATA_BASE_URL",
+        "ANDON_ENDPOINT",
+        "ANDON_ENTITY_SET",
+        "ANDON_API_KEY",
+        "ANDON_AUTH_HEADER",
+        "ANDON_TOP_N",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    app = load_config()
+    assert app.api.base_url == "https://gongsi.com:8092/andon"
+    assert app.api.endpoint == "o_d_andon_eventsrawdata_cur"
+    assert app.api.auth_header == "gongsi-Key"
+    assert app.api.top_n == 2000
+    assert app.api.verify_ssl is False
+
+
+def test_build_headers_uses_gongsi_key() -> None:
+    cfg = ApiConfig(api_key="api-key3", auth_header="gongsi-Key")
+    headers = build_headers(cfg)
+    assert headers["gongsi-Key"] == "api-key3"
+    assert headers["User-Agent"] == "Mozilla/5.0"
+    assert headers["Accept"] == "*/*"
+
+
+def test_extract_records_odata_value() -> None:
+    rows = extract_records({"value": [{"linename": "A1"}, {"linename": "B1"}]})
+    assert len(rows) == 2
+
+
+def test_cleaner_generates_chunk() -> None:
+    cleaner = AndonEventCleaner(CleanConfig())
+    cleaned = cleaner.clean_record(
+        {
+            "id": "1",
+            "linename": "SMT-A线",
+            "stationname": "op10",
+            "faulttype": "光电异常",
+            "eventsdescription": "光幕触发，传感器信号异常",
+            "reactionplan": "检查光幕",
+            "begintime": "2026-07-28T01:00:00Z",
+            "eventsname": "光幕报警",
+            "stationno": "10",
+        }
+    )
+    assert cleaned is not None
+    assert cleaned["linename"] == "SMT-A"
+    assert "线体:SMT-A" in cleaned["chunk"]
+    assert "光电" in cleaned["keywords"] or "光电异常" in cleaned["keywords"]
+
+
+def test_dedup_and_export(tmp_path: Path) -> None:
+    raw = [
+        {
+            "id": "1",
+            "linename": "L1",
+            "stationname": "S1",
+            "faulttype": "机械异常",
+            "eventsdescription": "卡料导致停机",
+            "reactionplan": "清料",
+            "begintime": "t1",
+            "eventsname": "卡料",
+            "stationno": "1",
+        },
+        {
+            "id": "2",
+            "linename": "L1",
+            "stationname": "S1",
+            "faulttype": "机械异常",
+            "eventsdescription": "卡料导致停机",
+            "reactionplan": "清料",
+            "begintime": "t2",
+            "eventsname": "卡料",
+            "stationno": "1",
+        },
+    ]
+    cleaned = clean_records(raw)
+    unique = deduplicate_records(cleaned)
+    assert len(unique) == 1
+    paths = export_knowledge_base(unique, raw, tmp_path)
+    assert paths["csv"].exists()
+    assert paths["raw"].exists()
+    assert "chunk" in paths["csv"].read_text(encoding="utf-8")
 
 
 @responses.activate
-def test_company_auth_header_abc(tmp_path: Path) -> None:
+def test_fetch_latest_events_orderby_top() -> None:
     base = "https://gongsi.com:8092/andon"
-    config = ApiConfig(
-        base_url=base,
-        endpoint="o_d_andon_eventsrawdata_cur",
-        api_key="SECRET",
-        auth_header="ABC",
-        user_agent="Mozilla/5.0",
-        verify_ssl=False,
-        top_n=2,
-        output_dir=tmp_path,
-        select_fields=("linename", "begintime"),
-    )
-
     responses.add(
         responses.GET,
         f"{base}/o_d_andon_eventsrawdata_cur",
-        json={"value": [{"linename": "A", "begintime": "t1"}]},
-        status=200,
-    )
-
-    client = ODataClient(config)
-    rows = list(client.iter_records())
-    assert rows[0]["linename"] == "A"
-    req = responses.calls[0].request
-    assert req.headers.get("ABC") == "SECRET"
-    assert req.headers.get("User-Agent") == "Mozilla/5.0"
-
-
-@responses.activate
-def test_odata_pagination_with_next_link(tmp_path: Path) -> None:
-    base = "https://example.com/odata"
-    config = ApiConfig(
-        base_url=base,
-        endpoint="AndonEvents",
-        api_key="test-key",
-        api_key_mode="header_api_key",
-        top_n=2,
-        output_dir=tmp_path,
-        select_fields=("linename", "begintime"),
-    )
-
-    responses.add(
-        responses.GET,
-        f"{base}/AndonEvents",
         json={
             "value": [
-                {"linename": "A", "begintime": "t1"},
-                {"linename": "B", "begintime": "t2"},
-            ],
-            "@odata.nextLink": f"{base}/AndonEvents?$skiptoken=abc",
+                {"linename": "A", "begintime": "2026-07-28T02:00:00Z"},
+                {"linename": "B", "begintime": "2026-07-28T01:00:00Z"},
+            ]
         },
         status=200,
     )
-    responses.add(
-        responses.GET,
-        f"{base}/AndonEvents",
-        json={"value": [{"linename": "C", "begintime": "t3"}]},
-        status=200,
-        match=[responses.matchers.query_param_matcher({"$skiptoken": "abc"})],
-    )
-
-    client = ODataClient(config)
-    rows = list(client.iter_records())
-    assert [r["linename"] for r in rows] == ["A", "B", "C"]
-    assert responses.calls[0].request.headers.get("api-key") == "test-key"
-
-
-@responses.activate
-def test_skip_top_fallback_pagination(tmp_path: Path) -> None:
-    base = "https://example.com/odata"
-    config = ApiConfig(
+    cfg = ApiConfig(
         base_url=base,
-        endpoint="AndonEvents",
-        api_key="k",
-        api_key_mode="header_x_api_key",
-        top_n=2,
-        output_dir=tmp_path,
-        select_fields=("linename",),
+        endpoint="o_d_andon_eventsrawdata_cur",
+        api_key="api-key3",
+        auth_header="gongsi-Key",
+        top_n=2000,
+        verify_ssl=False,
     )
-
-    responses.add(
-        responses.GET,
-        f"{base}/AndonEvents",
-        json={"value": [{"linename": "1"}, {"linename": "2"}], "@odata.count": 3},
-        status=200,
-    )
-    responses.add(
-        responses.GET,
-        f"{base}/AndonEvents",
-        json={"value": [{"linename": "3"}]},
-        status=200,
-    )
-
-    client = ODataClient(config)
-    rows = list(client.iter_records())
-    assert len(rows) == 3
-    assert responses.calls[0].request.headers.get("X-API-Key") == "k"
+    rows = fetch_latest_events(cfg)
+    assert len(rows) == 2
+    req = responses.calls[0].request
+    assert req.headers.get("gongsi-Key") == "api-key3"
+    assert "%24top=2000" in req.url or "$top=2000" in req.url
+    assert "begintime" in req.url

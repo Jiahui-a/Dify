@@ -8,6 +8,7 @@ __pycache__/
 .mypy_cache/
 data/raw/
 data/exports/
+output/
 *.xlsx
 .DS_Store
 .idea/
