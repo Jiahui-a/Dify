@@ -47,13 +47,41 @@ python -m andon_fetcher probe
 
 ## 快速开始
 
+### Windows（你当前环境）
+
+在仓库根目录 `Dify` 下打开 PowerShell / CMD（不要进 `andon_fetcher` 子目录）：
+
+```bat
+cd C:\Users\CHJ1WUJ\personal\And_analyse\Dify
+
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e .
+
+copy .env.example .env
+REM 编辑 .env，把 ANDON_API_KEY 换成真实密钥
+
+python -m andon_fetcher probe
+python -m andon_fetcher fetch
+```
+
+也可以直接用：
+
+```bat
+scripts\andon.bat probe
+scripts\andon.bat fetch
+```
+
+若仍报 `No module named 'andon_fetcher'`，说明当前目录不对或未安装包：先 `cd` 到 `Dify` 根目录，再执行一次 `pip install -e .`。
+
+### Linux / macOS
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-
+pip install -e .
 cp .env.example .env
-# 编辑 .env，填入公司服务器地址、实体集、API Key
+# 编辑 .env，填入真实 API Key
 
 # 探测实体与字段
 python -m andon_fetcher discover

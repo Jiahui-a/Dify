@@ -7,6 +7,11 @@ import logging
 import sys
 from pathlib import Path
 
+# 未 pip install 时，把仓库根目录加入 sys.path，避免 ModuleNotFoundError
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import click
 
 from andon_fetcher.config import load_config
