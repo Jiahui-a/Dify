@@ -1,0 +1,22 @@
+{
+  "name": "andon_odata_fetch",
+  "description": "从公司安灯 OData 接口按条件拉取报警/维修原始记录（API Key 鉴权）",
+  "method": "GET",
+  "url": "{{ANDON_ODATA_BASE_URL}}/{{ANDON_ENTITY_SET}}",
+  "headers": {
+    "Accept": "application/json",
+    "api-key": "{{ANDON_API_KEY}}"
+  },
+  "query": {
+    "$top": "100",
+    "$count": "true",
+    "$orderby": "begintime desc",
+    "$select": "linename,stationname,faulttype,eventsname,begintime,responsetime,endtime,confirmtime,reactionplan,actions,remark,ischangeparameter,parametername,oldvalue,newvalue,ischangequipment,changeeventdesc,equipmentpn,responseduration,repairduration,dowtimeduration,closeperson,responseperson",
+    "$filter": "{{optional_odata_filter}}"
+  },
+  "notes": [
+    "若公司网关使用 X-API-Key / Authorization Bearer，请改 headers。",
+    "OData 返回形如 { \"value\": [ {...}, ... ], \"@odata.nextLink\": \"...\" }。",
+    "Dify 单次请求适合抽样；全量分页请用 python -m andon_fetcher fetch。"
+  ]
+}
