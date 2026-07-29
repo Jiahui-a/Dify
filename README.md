@@ -1,25 +1,30 @@
-# 第一步：获取安灯原始数据
+# 安灯数据处理
 
-## 结论
-
-| 项 | 内容 |
-|---|---|
-| 存储位置 | 公司 **OData API**（不是直连 MySQL/SQL Server/PostgreSQL） |
-| 地址 | `https://gongsi.com:8092/andon`（按你环境改） |
-| 表/实体 | `o_d_andon_eventsrawdata_cur` |
-| 鉴权 | Header `X-Api-Key` |
-| 脚本 | `fetch_andon_events.py` |
-
-## 运行
+## 第一步：获取原始数据（近一个月）
 
 ```bat
 pip install -r requirements.txt
 python fetch_andon_events.py
 ```
 
-默认拉取 **近 30 天**（`$filter=begintime ge ...`），超过 2000 条会自动翻页。  
-在 `main()` 里可改：`days_back=30`、`top_n=2000`。
+- 来源：OData API（非直连数据库）
+- 表：`o_d_andon_eventsrawdata_cur`
+- 输出：`andon_events_raw.json` / `andon_events_core.csv`
 
-输出（`output` 目录）：
-- `andon_events_raw.json`：近一个月原始数据
-- `andon_events_core.json` / `andon_events_core.csv`：重要字段
+## 数据提取与基础清洗
+
+```bat
+python prepare_andon_data.py
+```
+
+会再次按近 30 天从 OData 拉取，并做：
+1. 字符串去空格  
+2. 时间字段转 datetime  
+3. 时长字段空值填 0  
+4. 过滤无文本且无维修时长的空记录  
+
+输出：
+- `factory_andon_data.csv`
+- `temp_cleaned_andon_data.csv`
+
+配置在各自脚本的 `main` / `API_CONFIG` 中修改 `base_url`、`api_key`、`days_back`。
