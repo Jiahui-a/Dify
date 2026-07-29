@@ -1,4 +1,4 @@
-"""API / 清洗配置（对齐可运行脚本）。"""
+"""第一步：安灯原始数据拉取配置。"""
 
 from __future__ import annotations
 
@@ -8,19 +8,48 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+# 第一步约定的核心字段
+CORE_FIELDS: tuple[str, ...] = (
+    "linename",
+    "stationname",
+    "faulttype",
+    "eventsname",
+    "begintime",
+    "responsetime",
+    "endtime",
+    "confirmtime",
+    "reactionplan",
+    "actions",
+    "remark",
+    "ischangeparameter",
+    "parametername",
+    "oldvalue",
+    "newvalue",
+    "ischangequipment",
+    "changeeventdesc",
+    "equipmentpn",
+    "responseduration",
+    "repairduration",
+    "dowtimeduration",
+    "closeperson",
+    "responseperson",
+)
+
 
 @dataclass
 class ApiConfig:
-    """API 配置"""
+    """公司安灯 OData API 连接信息（非直连 MySQL/SQL Server）。"""
 
     base_url: str = "https://gongsi.com:8092/andon"
-    endpoint: str = "o_d_andon_eventsrawdata_cur"
+    endpoint: str = "o_d_andon_eventsrawdata_cur"  # 核心表/实体：安灯原始事件
     api_key: str = "API_KEY"
     auth_header: str = "gongsi-Key"
     user_agent: str = "Mozilla/5.0"
     verify_ssl: bool = False
     timeout_seconds: int = 120
     top_n: int = 2000
+    # 是否在请求中带 $select=核心字段；False 则拉回全部字段再本地裁剪
+    use_select: bool = True
 
     @property
     def entity_url(self) -> str:
@@ -28,22 +57,9 @@ class ApiConfig:
 
 
 @dataclass
-class CleanConfig:
-    """清洗配置"""
-
-    max_desc_length: int = 80
-    max_plan_length: int = 60
-    max_keywords: int = 3
-    chunk_max_length: int = 150
-
-
-@dataclass
 class AppConfig:
-    """运行时配置"""
-
     api: ApiConfig = field(default_factory=ApiConfig)
-    clean: CleanConfig = field(default_factory=CleanConfig)
-    output_dir: Path = field(default_factory=lambda: Path("./output"))
+    output_dir: Path = field(default_factory=lambda: Path("./data/raw"))
 
 
 def _as_bool(value: str | None, default: bool) -> bool:
@@ -53,7 +69,6 @@ def _as_bool(value: str | None, default: bool) -> bool:
 
 
 def load_config(env_file: str | Path | None = None) -> AppConfig:
-    """从 .env / 环境变量加载配置。"""
     if env_file:
         load_dotenv(dotenv_path=env_file, override=False)
     else:
@@ -86,13 +101,9 @@ def load_config(env_file: str | Path | None = None) -> AppConfig:
             or os.getenv("ANDON_PAGE_SIZE")
             or str(defaults.top_n)
         ),
+        use_select=_as_bool(os.getenv("ANDON_USE_SELECT"), defaults.use_select),
     )
     return AppConfig(
         api=api,
-        clean=CleanConfig(),
-        output_dir=Path(os.getenv("ANDON_OUTPUT_DIR", "./output")),
+        output_dir=Path(os.getenv("ANDON_OUTPUT_DIR", "./data/raw")),
     )
-
-
-# 兼容旧导入名
-AndonConfig = ApiConfig
