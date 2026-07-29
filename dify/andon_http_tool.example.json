@@ -1,11 +1,12 @@
 {
   "name": "andon_odata_fetch",
-  "description": "从公司安灯 OData 接口按条件拉取报警/维修原始记录（API Key 鉴权）",
+  "description": "从公司安灯 OData 接口拉取 o_d_andon_eventsrawdata_cur 原始记录（自定义 Header ABC 传 API Key）",
   "method": "GET",
-  "url": "{{ANDON_ODATA_BASE_URL}}/{{ANDON_ENTITY_SET}}",
+  "url": "https://gongsi.com:8092/andon/o_d_andon_eventsrawdata_cur",
   "headers": {
     "Accept": "application/json",
-    "api-key": "{{ANDON_API_KEY}}"
+    "ABC": "{{ANDON_API_KEY}}",
+    "User-Agent": "Mozilla/5.0"
   },
   "query": {
     "$top": "100",
@@ -15,8 +16,9 @@
     "$filter": "{{optional_odata_filter}}"
   },
   "notes": [
-    "若公司网关使用 X-API-Key / Authorization Bearer，请改 headers。",
+    "鉴权：Header 名 ABC，值为 API Key（对应 ApiConfig.auth_header / api_key）。",
+    "verify_ssl=false（内网证书）。",
     "OData 返回形如 { \"value\": [ {...}, ... ], \"@odata.nextLink\": \"...\" }。",
-    "Dify 单次请求适合抽样；全量分页请用 python -m andon_fetcher fetch。"
+    "全量分页请用 python -m andon_fetcher fetch。"
   ]
 }

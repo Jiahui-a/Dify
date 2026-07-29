@@ -6,7 +6,7 @@ from pathlib import Path
 
 import responses
 
-from andon_fetcher.config import AndonConfig, CORE_FIELDS
+from andon_fetcher.config import ApiConfig, CORE_FIELDS, load_config
 from andon_fetcher.field_mapper import canonicalize_record
 from andon_fetcher.odata_client import ODataClient
 
@@ -33,15 +33,63 @@ def test_canonicalize_record_aliases() -> None:
     assert set(CORE_FIELDS).issubset(mapped.keys())
 
 
+def test_api_config_defaults_and_aliases(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("ANDON_ODATA_BASE_URL", raising=False)
+    monkeypatch.delenv("ANDON_ENTITY_SET", raising=False)
+    monkeypatch.delenv("ANDON_ENDPOINT", raising=False)
+    monkeypatch.delenv("ANDON_API_KEY", raising=False)
+    # 无 .env 时使用 ApiConfig 默认值
+    monkeypatch.chdir(tmp_path)
+    config = load_config()
+    assert config.base_url == "https://gongsi.com:8092/andon"
+    assert config.endpoint == "o_d_andon_eventsrawdata_cur"
+    assert config.entity_set == "o_d_andon_eventsrawdata_cur"
+    assert config.auth_header == "ABC"
+    assert config.page_size == config.top_n == 500
+    assert config.verify_ssl is False
+    assert config.timeout_seconds == 120
+    assert config.entity_url.endswith("/andon/o_d_andon_eventsrawdata_cur")
+
+
+@responses.activate
+def test_company_auth_header_abc(tmp_path: Path) -> None:
+    base = "https://gongsi.com:8092/andon"
+    config = ApiConfig(
+        base_url=base,
+        endpoint="o_d_andon_eventsrawdata_cur",
+        api_key="SECRET",
+        auth_header="ABC",
+        user_agent="Mozilla/5.0",
+        verify_ssl=False,
+        top_n=2,
+        output_dir=tmp_path,
+        select_fields=("linename", "begintime"),
+    )
+
+    responses.add(
+        responses.GET,
+        f"{base}/o_d_andon_eventsrawdata_cur",
+        json={"value": [{"linename": "A", "begintime": "t1"}]},
+        status=200,
+    )
+
+    client = ODataClient(config)
+    rows = list(client.iter_records())
+    assert rows[0]["linename"] == "A"
+    req = responses.calls[0].request
+    assert req.headers.get("ABC") == "SECRET"
+    assert req.headers.get("User-Agent") == "Mozilla/5.0"
+
+
 @responses.activate
 def test_odata_pagination_with_next_link(tmp_path: Path) -> None:
     base = "https://example.com/odata"
-    config = AndonConfig(
+    config = ApiConfig(
         base_url=base,
-        entity_set="AndonEvents",
+        endpoint="AndonEvents",
         api_key="test-key",
         api_key_mode="header_api_key",
-        page_size=2,
+        top_n=2,
         output_dir=tmp_path,
         select_fields=("linename", "begintime"),
     )
@@ -75,12 +123,12 @@ def test_odata_pagination_with_next_link(tmp_path: Path) -> None:
 @responses.activate
 def test_skip_top_fallback_pagination(tmp_path: Path) -> None:
     base = "https://example.com/odata"
-    config = AndonConfig(
+    config = ApiConfig(
         base_url=base,
-        entity_set="AndonEvents",
+        endpoint="AndonEvents",
         api_key="k",
         api_key_mode="header_x_api_key",
-        page_size=2,
+        top_n=2,
         output_dir=tmp_path,
         select_fields=("linename",),
     )

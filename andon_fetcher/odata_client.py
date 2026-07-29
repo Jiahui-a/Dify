@@ -30,6 +30,7 @@ class ODataClient:
         headers: dict[str, str] = {
             "Accept": "application/json",
             "Content-Type": "application/json",
+            "User-Agent": self.config.user_agent,
         }
         params: dict[str, str] = {}
 
@@ -41,8 +42,9 @@ class ODataClient:
             headers["Authorization"] = f"ApiKey {key}"
         elif mode == "header_authorization_bearer":
             headers["Authorization"] = f"Bearer {key}"
-        elif mode == "header_custom":
-            header_name = self.config.api_key_header or "X-API-Key"
+        elif mode in {"header_custom", "auth_header"}:
+            # 公司网关：Header 名由 auth_header 指定，例如 ABC: <api_key>
+            header_name = self.config.auth_header or self.config.api_key_header or "ABC"
             headers[header_name] = key
         elif mode == "query_api_key":
             params["api-key"] = key

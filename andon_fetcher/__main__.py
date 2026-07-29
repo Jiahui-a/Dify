@@ -34,9 +34,11 @@ def probe(env_file: str | None, save_metadata: str | None) -> None:
     config = load_config(env_file)
     client = ODataClient(config)
 
-    click.echo(f"Base URL : {config.base_url}")
-    click.echo(f"Entity   : {config.entity_set}")
-    click.echo(f"Auth mode: {config.api_key_mode}")
+    click.echo(f"Base URL    : {config.base_url}")
+    click.echo(f"Endpoint    : {config.endpoint}")
+    click.echo(f"Auth header : {config.auth_header} (mode={config.api_key_mode})")
+    click.echo(f"User-Agent  : {config.user_agent}")
+    click.echo(f"Verify SSL  : {config.verify_ssl}")
 
     try:
         metadata = client.get_metadata()

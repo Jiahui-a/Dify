@@ -3,16 +3,34 @@
 第一步：从公司服务器通过 **OData API** 拉取安灯原始数据。  
 鉴权方式为 **API Key**（非直连 MySQL/SQL Server）。
 
-## 你需要准备的信息
+## 公司 ApiConfig（已对齐）
 
-| 项 | 说明 | 环境变量 |
-|---|---|---|
-| OData 服务根地址 | 例如 `https://mes.company.com/odata` | `ANDON_ODATA_BASE_URL` |
-| 实体集名称 | 报警/维修记录在 OData 中的名字 | `ANDON_ENTITY_SET` |
-| API Key | 公司网关颁发的密钥 | `ANDON_API_KEY` |
-| Key 传递方式 | Header / Query，见下方 | `ANDON_API_KEY_MODE` |
+```python
+class ApiConfig:
+    base_url: str = "https://gongsi.com:8092/andon"
+    endpoint: str = "o_d_andon_eventsrawdata_cur"
+    api_key: str = "API_KEY"          # 换成真实密钥
+    auth_header: str = "ABC"          # 请求头: ABC: <api_key>
+    user_agent: str = "Mozilla/5.0"
+    verify_ssl: bool = False
+    timeout_seconds: int = 120
+    top_n: int = 500                  # OData $top 分页大小
+```
 
-若不确定实体集名，先配置好 URL + Key，再执行：
+完整请求 URL：
+
+`https://gongsi.com:8092/andon/o_d_andon_eventsrawdata_cur`
+
+| ApiConfig | 环境变量 |
+|---|---|
+| `base_url` | `ANDON_ODATA_BASE_URL` |
+| `endpoint` | `ANDON_ENDPOINT` / `ANDON_ENTITY_SET` |
+| `api_key` | `ANDON_API_KEY` |
+| `auth_header` | `ANDON_AUTH_HEADER`（模式 `header_custom`） |
+| `user_agent` | `ANDON_USER_AGENT` |
+| `verify_ssl` | `ANDON_VERIFY_SSL=false` |
+| `timeout_seconds` | `ANDON_TIMEOUT_SECONDS=120` |
+| `top_n` | `ANDON_TOP_N` / `ANDON_PAGE_SIZE` |
 
 ```bash
 python -m andon_fetcher discover
@@ -58,19 +76,22 @@ python -m andon_fetcher fetch --filter "begintime ge 2026-07-01T00:00:00Z"
 
 ## API Key 模式
 
-在 `.env` 中设置 `ANDON_API_KEY_MODE`：
+公司默认：`ANDON_API_KEY_MODE=header_custom` + `ANDON_AUTH_HEADER=ABC`  
+→ 实际发送 `ABC: <API_KEY>`，并带 `User-Agent: Mozilla/5.0`。
+
+其他可选模式：
 
 | 模式 | 实际发送 |
 |---|---|
-| `header_api_key`（默认） | `api-key: <key>` |
+| `header_custom`（默认） | `<ANDON_AUTH_HEADER>: <key>` |
+| `header_api_key` | `api-key: <key>` |
 | `header_x_api_key` | `X-API-Key: <key>` |
 | `header_authorization_apikey` | `Authorization: ApiKey <key>` |
 | `header_authorization_bearer` | `Authorization: Bearer <key>` |
-| `header_custom` | 使用 `ANDON_API_KEY_HEADER` 指定的 Header 名 |
 | `query_api_key` | `?api-key=<key>` |
 | `query_apikey` | `?apiKey=<key>` |
 
-内网自签证书可设 `ANDON_VERIFY_SSL=false`。
+内网自签证书：`ANDON_VERIFY_SSL=false`。
 
 ## 无内网时本地 Mock 联调
 
