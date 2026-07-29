@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Iterator
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import requests
+import urllib3
+from requests.exceptions import RequestException, SSLError
 
 from andon_fetcher.config import AndonConfig
 
@@ -17,12 +19,21 @@ class ODataClientError(RuntimeError):
     """OData 请求失败。"""
 
 
+def switch_scheme(url: str, scheme: str) -> str:
+    """把 URL 的协议改成 http/https。"""
+    parsed = urlparse(url)
+    return urlunparse(parsed._replace(scheme=scheme))
+
+
 class ODataClient:
     """通用 OData v4 客户端，适配公司安灯 API-Key 鉴权。"""
 
     def __init__(self, config: AndonConfig, session: requests.Session | None = None):
         self.config = config
         self.session = session or requests.Session()
+        self._http_fallback_enabled = True
+        if not config.verify_ssl:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     def _auth_headers_and_params(self) -> tuple[dict[str, str], dict[str, str]]:
         mode = self.config.api_key_mode.lower()
@@ -85,17 +96,76 @@ class ODataClient:
             params.update(self.config.extra_params)
         return params
 
+    def _adopt_http_base(self) -> None:
+        """HTTPS 握手失败时，把配置中的 base_url 永久切到 http。"""
+        if self.config.base_url.lower().startswith("https://"):
+            http_base = switch_scheme(self.config.base_url, "http")
+            logger.warning(
+                "HTTPS TLS/SSL 失败（常见于公司 8092 端口实际是 HTTP）。"
+                "已自动改用: %s",
+                http_base,
+            )
+            logger.warning(
+                "请把 .env 中 ANDON_ODATA_BASE_URL 改成 http://... 以避免每次重试。"
+            )
+            self.config.base_url = http_base
+
+    def _request_get(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        params: dict[str, Any] | None,
+    ) -> requests.Response:
+        """
+        发起 GET；若 https 出现 SSLError（如 ASN1 NOT_ENOUGH_DATA），
+        自动用 http 重试一次。
+        """
+        try:
+            return self.session.get(
+                url,
+                headers=headers,
+                params=params if params else None,
+                timeout=self.config.timeout_seconds,
+                verify=self.config.verify_ssl,
+            )
+        except SSLError as exc:
+            can_fallback = (
+                self._http_fallback_enabled
+                and url.lower().startswith("https://")
+            )
+            if not can_fallback:
+                raise ODataClientError(
+                    "SSL 连接失败。"
+                    "若公司安灯端口实际是 HTTP，请把 ANDON_ODATA_BASE_URL "
+                    "改成 http://主机:8092/andon（不要用 https）。"
+                    f" 原始错误: {exc}"
+                ) from exc
+
+            http_url = switch_scheme(url, "http")
+            logger.warning("HTTPS SSLError，改用 HTTP 重试: %s", http_url)
+            self._adopt_http_base()
+            try:
+                return self.session.get(
+                    http_url,
+                    headers=headers,
+                    params=params if params else None,
+                    timeout=self.config.timeout_seconds,
+                    verify=False,
+                )
+            except RequestException as retry_exc:
+                raise ODataClientError(
+                    "HTTPS 与 HTTP 均请求失败。"
+                    f" https错误={exc}; http错误={retry_exc}"
+                ) from retry_exc
+        except RequestException as exc:
+            raise ODataClientError(f"网络请求失败: {exc}") from exc
+
     def get_metadata(self) -> str:
         """拉取 $metadata（XML），用于确认实体与字段名。"""
         headers, auth_params = self._auth_headers_and_params()
         url = f"{self.config.base_url.rstrip('/')}/$metadata"
-        response = self.session.get(
-            url,
-            headers=headers,
-            params=auth_params,
-            timeout=self.config.timeout_seconds,
-            verify=self.config.verify_ssl,
-        )
+        response = self._request_get(url, headers=headers, params=auth_params)
         if response.status_code >= 400:
             raise ODataClientError(
                 f"获取 $metadata 失败: HTTP {response.status_code} - {response.text[:500]}"
@@ -122,6 +192,11 @@ class ODataClient:
             params: dict[str, Any] = dict(auth_params)
             if not target.startswith("http"):
                 target = urljoin(self.config.base_url.rstrip("/") + "/", target.lstrip("/"))
+            # 若已切到 http，把 nextLink 里残留的 https 一并改掉
+            if self.config.base_url.lower().startswith("http://") and target.lower().startswith(
+                "https://"
+            ):
+                target = switch_scheme(target, "http")
         else:
             params = self._build_query_params(
                 top=top if top is not None else self.config.page_size,
@@ -133,14 +208,12 @@ class ODataClient:
                 extra=extra,
             )
 
-        logger.debug("GET %s params=%s", target, {k: v for k, v in params.items() if k not in {"api-key", "apiKey"}})
-        response = self.session.get(
+        logger.debug(
+            "GET %s params=%s",
             target,
-            headers=headers,
-            params=params if params else None,
-            timeout=self.config.timeout_seconds,
-            verify=self.config.verify_ssl,
+            {k: v for k, v in params.items() if k not in {"api-key", "apiKey"}},
         )
+        response = self._request_get(target, headers=headers, params=params)
         if response.status_code >= 400:
             raise ODataClientError(
                 f"OData 请求失败: HTTP {response.status_code} - {response.text[:800]}"

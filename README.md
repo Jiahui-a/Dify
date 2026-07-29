@@ -19,7 +19,10 @@ class ApiConfig:
 
 完整请求 URL：
 
-`https://gongsi.com:8092/andon/o_d_andon_eventsrawdata_cur`
+`http://gongsi.com:8092/andon/o_d_andon_eventsrawdata_cur`
+
+> 若报 `SSLError` / `ASN1 NOT_ENOUGH_DATA`：说明 8092 端口不是 HTTPS。  
+> 把 `.env` 里的地址改成 **`http://...`**（不要用 `https://`）。`verify_ssl=false` 解决不了这个问题。
 
 | ApiConfig | 环境变量 |
 |---|---|

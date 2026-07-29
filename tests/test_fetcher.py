@@ -41,7 +41,7 @@ def test_api_config_defaults_and_aliases(tmp_path: Path, monkeypatch) -> None:
     # 无 .env 时使用 ApiConfig 默认值
     monkeypatch.chdir(tmp_path)
     config = load_config()
-    assert config.base_url == "https://gongsi.com:8092/andon"
+    assert config.base_url == "http://gongsi.com:8092/andon"
     assert config.endpoint == "o_d_andon_eventsrawdata_cur"
     assert config.entity_set == "o_d_andon_eventsrawdata_cur"
     assert config.auth_header == "ABC"

@@ -42,7 +42,7 @@ CORE_FIELDS: tuple[str, ...] = (
 class ApiConfig:
     """API 配置（与公司安灯网关约定一致）。"""
 
-    base_url: str = "https://gongsi.com:8092/andon"
+    base_url: str = "http://gongsi.com:8092/andon"
     endpoint: str = "o_d_andon_eventsrawdata_cur"
     api_key: str = "API_KEY"
     auth_header: str = "ABC"

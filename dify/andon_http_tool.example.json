@@ -2,7 +2,7 @@
   "name": "andon_odata_fetch",
   "description": "从公司安灯 OData 接口拉取 o_d_andon_eventsrawdata_cur 原始记录（自定义 Header ABC 传 API Key）",
   "method": "GET",
-  "url": "https://gongsi.com:8092/andon/o_d_andon_eventsrawdata_cur",
+  "url": "http://gongsi.com:8092/andon/o_d_andon_eventsrawdata_cur",
   "headers": {
     "Accept": "application/json",
     "ABC": "{{ANDON_API_KEY}}",
