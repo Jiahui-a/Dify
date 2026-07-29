@@ -10,6 +10,7 @@ import json
 import ssl
 import csv
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -62,7 +63,8 @@ class ApiConfig:
     user_agent: str = "Mozilla/5.0"
     verify_ssl: bool = False
     timeout_seconds: int = 120
-    top_n: int = 2000
+    top_n: int = 2000          # 每页条数
+    days_back: int = 30         # 近一个月（最近 N 天）
 
 
 class InsecureHTTPSAdapter(HTTPAdapter):
@@ -120,33 +122,65 @@ def extract_records(payload: dict[str, Any]) -> list[dict[str, Any]]:
     raise ValueError("Unexpected API payload shape: expected OData `value` array.")
 
 
+def _since_iso(days_back: int) -> str:
+    """近 N 天起点（UTC）。"""
+    start = datetime.now(timezone.utc) - timedelta(days=days_back)
+    return start.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def fetch_latest_events(config: ApiConfig) -> list[dict[str, Any]]:
-    """拉取最新 N 条安灯原始事件"""
-    params = {
-        "$top": str(config.top_n),
-        "$orderby": "begintime desc",
-    }
+    """拉取近一个月（days_back 天）安灯原始事件；按页 $skip 拉全。"""
+    since = _since_iso(config.days_back)
+    # OData 时间过滤：begintime >= 近一个月起点
+    filter_expr = f"begintime ge {since}"
+
     base_url = urljoin(f"{config.base_url}/", config.endpoint.lstrip("/"))
-    query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-    url = f"{base_url}?{query_string}"
+    page_size = config.top_n
+    skip = 0
+    all_records: list[dict[str, Any]] = []
 
     print(f"[step1] 存储方式: OData API（API Key），非直连数据库")
     print(f"[step1] 地址: {config.base_url}")
     print(f"[step1] 表/实体: {config.endpoint}")
     print(f"[step1] 鉴权头: {config.auth_header}")
-    print(f"[step1] 请求: {url}")
-    print(f"[step1] 拉取最新 {config.top_n} 条")
+    print(f"[step1] 时间范围: begintime >= {since}（近 {config.days_back} 天）")
+    print(f"[step1] 分页大小: {page_size}")
 
     try:
-        payload = _fetch_json(config, url)
-        records = extract_records(payload)
-        print(f"[step1] 共拉取 {len(records)} 条原始记录")
-        return records
+        page_no = 0
+        while True:
+            page_no += 1
+            params = {
+                "$top": str(page_size),
+                "$skip": str(skip),
+                "$orderby": "begintime desc",
+                "$filter": filter_expr,
+            }
+            query_string = "&".join([f"{k}={v}" for k, v in params.items()])
+            url = f"{base_url}?{query_string}"
+            print(f"[step1] 第 {page_no} 页: $skip={skip}")
+            print(f"[step1] 请求: {url}")
+
+            payload = _fetch_json(config, url)
+            page = extract_records(payload)
+            print(f"[step1] 本页 {len(page)} 条")
+            all_records.extend(page)
+
+            if len(page) < page_size:
+                break
+            skip += page_size
+
+        print(f"[step1] 共拉取 {len(all_records)} 条原始记录（近 {config.days_back} 天）")
+        return all_records
     except requests.exceptions.HTTPError as e:
         print(f"[step1] HTTP 错误: {e}")
         if hasattr(e, "response") and e.response is not None:
             print(f"[step1] 状态码: {e.response.status_code}")
             print(f"[step1] 响应内容: {e.response.text[:500]}")
+            print(
+                "[step1] 若 $filter 报错，可尝试把时间格式改成: "
+                "begintime ge datetime'YYYY-MM-DDTHH:MM:SS'"
+            )
         raise
     except Exception as e:
         print(f"[step1] 拉取失败: {e}")
@@ -193,7 +227,8 @@ def main():
         api_key="zidingyi",
         auth_header="X-Api-Key",
         verify_ssl=False,
-        top_n=2000,
+        top_n=2000,    # 每页条数
+        days_back=30,   # 近一个月
     )
     # ===== 配置结束 =====
 

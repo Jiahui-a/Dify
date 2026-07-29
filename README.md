@@ -17,8 +17,9 @@ pip install -r requirements.txt
 python fetch_andon_events.py
 ```
 
-在 `main()` 里保持你已跑通的 `base_url` / `api_key`。
+默认拉取 **近 30 天**（`$filter=begintime ge ...`），超过 2000 条会自动翻页。  
+在 `main()` 里可改：`days_back=30`、`top_n=2000`。
 
 输出（`output` 目录）：
-- `andon_events_raw.json`：接口全量原始数据
+- `andon_events_raw.json`：近一个月原始数据
 - `andon_events_core.json` / `andon_events_core.csv`：重要字段
