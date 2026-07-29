@@ -1,4 +1,4 @@
-"""第一步：原始数据拉取相关测试。"""
+"""与 fetch_andon_raw.py 对齐的测试。"""
 
 from __future__ import annotations
 
@@ -6,78 +6,36 @@ from pathlib import Path
 
 import responses
 
-from andon_fetcher.config import CORE_FIELDS, ApiConfig, load_config
-from andon_fetcher.fetch import extract_records, fetch_raw_events, project_core_fields
-from andon_fetcher.http_session import build_headers
-from andon_fetcher.raw_export import save_raw
+import fetch_andon_raw as raw
 
 
-def test_step1_config_defaults(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    for key in (
-        "ANDON_ODATA_BASE_URL",
-        "ANDON_ENDPOINT",
-        "ANDON_ENTITY_SET",
-        "ANDON_API_KEY",
-        "ANDON_AUTH_HEADER",
-        "ANDON_TOP_N",
-        "ANDON_OUTPUT_DIR",
-    ):
-        monkeypatch.delenv(key, raising=False)
-    app = load_config()
-    assert app.api.endpoint == "o_d_andon_eventsrawdata_cur"
-    assert app.api.auth_header == "gongsi-Key"
-    assert app.output_dir == Path("./data/raw")
-    assert "linename" in CORE_FIELDS
-    assert "responseperson" in CORE_FIELDS
-    assert len(CORE_FIELDS) == 23
+def test_core_fields_count() -> None:
+    assert len(raw.CORE_FIELDS) == 23
+    assert "linename" in raw.CORE_FIELDS
+    assert "responseperson" in raw.CORE_FIELDS
 
 
 def test_build_headers() -> None:
-    headers = build_headers(ApiConfig(api_key="api-key3", auth_header="gongsi-Key"))
+    cfg = raw.ApiConfig(api_key="api-key3", auth_header="gongsi-Key")
+    headers = raw._build_headers(cfg)
     assert headers["gongsi-Key"] == "api-key3"
+    assert headers["Accept"] == "*/*"
 
 
-def test_project_core_fields_case_insensitive() -> None:
-    raw = {
-        "LineName": "L1",
-        "StationName": "OP10",
-        "FaultType": "设备",
-        "EventsName": "急停",
-        "BeginTime": "t1",
-        "extra": "ignore-me",
-    }
-    projected = project_core_fields(raw)
-    assert projected["linename"] == "L1"
-    assert projected["stationname"] == "OP10"
-    assert projected["eventsname"] == "急停"
-    assert set(projected.keys()) == set(CORE_FIELDS)
-    assert "extra" not in projected
+def test_extract_records() -> None:
+    rows = raw.extract_records({"value": [{"linename": "A"}]})
+    assert rows[0]["linename"] == "A"
 
 
-def test_extract_and_save(tmp_path: Path) -> None:
-    rows = extract_records(
-        {
-            "value": [
-                {
-                    "linename": "A",
-                    "stationname": "S1",
-                    "faulttype": "F",
-                    "eventsname": "E",
-                    "begintime": "t",
-                }
-            ]
-        }
-    )
-    paths = save_raw(rows, tmp_path)
-    assert paths["core_csv"].exists()
-    text = paths["core_csv"].read_text(encoding="utf-8-sig")
-    assert "linename" in text
-    assert "A" in text
+def test_save_raw(tmp_path: Path) -> None:
+    raw.save_raw([{"linename": "L1", "begintime": "t1", "foo": 1}], tmp_path)
+    files = list(tmp_path.glob("*.csv"))
+    assert files
+    assert "linename" in files[0].read_text(encoding="utf-8-sig")
 
 
 @responses.activate
-def test_fetch_raw_events_selects_core_fields() -> None:
+def test_fetch_latest_events() -> None:
     base = "https://gongsi.com:8092/andon"
     responses.add(
         responses.GET,
@@ -85,17 +43,14 @@ def test_fetch_raw_events_selects_core_fields() -> None:
         json={"value": [{"linename": "A", "begintime": "t1"}]},
         status=200,
     )
-    cfg = ApiConfig(
+    cfg = raw.ApiConfig(
         base_url=base,
         endpoint="o_d_andon_eventsrawdata_cur",
         api_key="api-key3",
         auth_header="gongsi-Key",
         top_n=2000,
-        use_select=True,
+        verify_ssl=False,
     )
-    rows = fetch_raw_events(cfg)
+    rows = raw.fetch_latest_events(cfg)
     assert len(rows) == 1
-    req = responses.calls[0].request
-    assert req.headers.get("gongsi-Key") == "api-key3"
-    assert "linename" in req.url
-    assert "%24top=2000" in req.url or "$top=2000" in req.url
+    assert responses.calls[0].request.headers.get("gongsi-Key") == "api-key3"

@@ -4,15 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "andon-fetcher"
-version = "0.3.0"
-description = "Step1: fetch raw Andon OData events"
+version = "0.4.0"
+description = "Step1: fetch raw Andon events (single-script style)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "requests>=2.31.0",
-  "python-dotenv>=1.0.0",
-  "click>=8.1.0",
   "urllib3>=2.0.0",
+  "click>=8.1.0",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +22,9 @@ andon-fetcher = "andon_fetcher.__main__:cli"
 
 [tool.setuptools.packages.find]
 include = ["andon_fetcher*"]
+
+[tool.setuptools]
+py-modules = ["fetch_andon_raw"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
