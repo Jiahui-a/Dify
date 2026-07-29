@@ -14,12 +14,17 @@ from pathlib import Path
 
 import pandas as pd
 import requests
+import urllib3
 
 from prepare_andon_data import OUTPUT_DIR, TEMP_CSV_PATH, fetch_and_clean_data
 
 # --- Dify API 配置 ---
 DIFY_API_KEY = "YOUR_DIFY_APP_API_KEY"
-DIFY_API_BASE = "https://cloud.dify.ai/v1"  # 自建可改成 http://localhost/v1
+DIFY_API_BASE = "https://gongsi.com/v1"  # 自建 Dify 地址
+DIFY_VERIFY_SSL = False  # 内网自签证书：关闭 SSL 校验
+
+# 内网 HTTPS 关闭校验时的告警静默
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 输出：带 LLM 标签的最终 CSV
 OUTPUT_CSV_PATH = OUTPUT_DIR / "factory_andon_data.csv"
@@ -114,7 +119,13 @@ def call_dify_for_tagging(text_to_analyze) -> dict:
     try:
         # 优先 Completion；若 404 再试 Chat
         url = f"{DIFY_API_BASE.rstrip('/')}/completion-messages"
-        response = requests.post(url, headers=headers, json=data, timeout=120)
+        response = requests.post(
+            url,
+            headers=headers,
+            json=data,
+            timeout=120,
+            verify=DIFY_VERIFY_SSL,
+        )
         if response.status_code == 404:
             chat_data = {
                 "inputs": {"text_to_analyze": text},
@@ -123,7 +134,13 @@ def call_dify_for_tagging(text_to_analyze) -> dict:
                 "user": "andon_analysis_script",
             }
             url = f"{DIFY_API_BASE.rstrip('/')}/chat-messages"
-            response = requests.post(url, headers=headers, json=chat_data, timeout=120)
+            response = requests.post(
+                url,
+                headers=headers,
+                json=chat_data,
+                timeout=120,
+                verify=DIFY_VERIFY_SSL,
+            )
 
         response.raise_for_status()
         result = response.json()
