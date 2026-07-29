@@ -17,11 +17,12 @@ import requests
 import urllib3
 
 from prepare_andon_data import OUTPUT_DIR, TEMP_CSV_PATH, fetch_and_clean_data
-
-# --- Dify API 配置 ---
-DIFY_API_KEY = "YOUR_DIFY_APP_API_KEY"
-DIFY_API_BASE = "https://gongsi.com/v1"  # 自建 Dify 地址
-DIFY_VERIFY_SSL = False  # 内网自签证书：关闭 SSL 校验
+from dify_config import (
+    DIFY_API_BASE,
+    DIFY_API_KEY,
+    DIFY_VERIFY_SSL,
+    SLEEP_SECONDS,
+)
 
 # 内网 HTTPS 关闭校验时的告警静默
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -31,9 +32,6 @@ OUTPUT_CSV_PATH = OUTPUT_DIR / "factory_andon_data.csv"
 
 # 可选：只处理前 N 条做试跑；None 表示全量
 MAX_ROWS = None
-
-# 每次调用间隔（秒），降低限速风险
-SLEEP_SECONDS = 0.1
 
 LLM_TAGGING_PROMPT = """
 你是一个资深的生产安灯数据分析助手。你的任务是从安灯记录中提取关键的维修动作和涉及的备件信息，并进行分类。
@@ -98,7 +96,7 @@ def call_dify_for_tagging(text_to_analyze) -> dict:
 
     if not DIFY_API_KEY or DIFY_API_KEY == "YOUR_DIFY_APP_API_KEY":
         raise RuntimeError(
-            "请先在 llm_tag_andon_data.py 中配置有效的 DIFY_API_KEY"
+            "请先在 dify_config.py 中配置有效的 DIFY_API_KEY"
         )
 
     headers = {

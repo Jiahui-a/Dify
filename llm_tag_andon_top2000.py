@@ -1,31 +1,23 @@
 """
-LLM 语义标签化 - 仅前 2000 条（自包含，不依赖 llm_tag_andon_data 导入）
+LLM 语义标签化 - 仅前 2000 条
 
-- Dify 地址：https://gongsi.com/v1
-- 已关闭 SSL 证书校验（verify=False）
+Dify 配置统一读取 dify_config.py（与 llm_tag_andon_data.py 共用同一套 Key/URL）
 - 每 20 条落盘；Ctrl+C 暂停也会保存；再运行可续跑
 """
 
 from __future__ import annotations
 
-import json
-import re
 import time
 from pathlib import Path
 
 import pandas as pd
-import requests
 import urllib3
 
+import llm_tag_andon_data as tagger
+from dify_config import DIFY_API_BASE, DIFY_API_KEY, DIFY_VERIFY_SSL, SLEEP_SECONDS
 from prepare_andon_data import OUTPUT_DIR, TEMP_CSV_PATH
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# --- Dify API 配置（在本文件直接改）---
-DIFY_API_KEY = "YOUR_DIFY_APP_API_KEY"
-DIFY_API_BASE = "https://gongsi.com/v1"
-DIFY_VERIFY_SSL = False  # 关闭 SSL 证书校验
-SLEEP_SECONDS = 0.1
 
 TOP_N = 2000
 SAVE_EVERY = 20
@@ -36,120 +28,6 @@ TAG_COLS = [
     "is_reset_only",
     "extracted_fault_reason",
 ]
-
-LLM_TAGGING_PROMPT = """
-你是一个资深的生产安灯数据分析助手。你的任务是从安灯记录中提取关键的维修动作和涉及的备件信息，并进行分类。
-
-请根据以下安灯记录的文本内容，输出一个JSON对象，包含以下字段：
-- "action_category": 维修动作类别，可能值包括："复位/重启", "清理/检查", "参数调整", "更换备件", "维修/调试", "其他"。
-- "extracted_parts": 如果有明确的备件更换，提取备件的名称，用逗号分隔。如果没有，则为空字符串。
-- "is_reset_only": 如果主要动作是复位/重启/清理，且没有涉及更复杂的维修或换件，则为 true，否则为 false。
-- "extracted_fault_reason": 从文本中尝试提取故障的根本原因，用精炼的语言描述。如果没有明确原因，则为空字符串。
-
-请处理以下安灯记录文本：
-TEXT: {text_to_analyze}
-"""
-
-DEFAULT_TAGS = {
-    "action_category": "其他",
-    "extracted_parts": "",
-    "is_reset_only": False,
-    "extracted_fault_reason": "",
-}
-
-
-def _parse_llm_json(text: str) -> dict:
-    text = (text or "").strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r"\{[\s\S]*\}", text)
-    if not match:
-        raise ValueError(f"no json object in: {text[:200]}")
-    return json.loads(match.group(0))
-
-
-def call_dify_for_tagging(text_to_analyze) -> dict:
-    if text_to_analyze is None or (isinstance(text_to_analyze, float) and pd.isna(text_to_analyze)):
-        return dict(DEFAULT_TAGS)
-    text = str(text_to_analyze).strip()
-    if not text or text.lower() == "nan":
-        return dict(DEFAULT_TAGS)
-
-    if not DIFY_API_KEY or DIFY_API_KEY == "YOUR_DIFY_APP_API_KEY":
-        raise RuntimeError("请先在 llm_tag_andon_top2000.py 中配置 DIFY_API_KEY")
-
-    headers = {
-        "Authorization": f"Bearer {DIFY_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    prompt = LLM_TAGGING_PROMPT.format(text_to_analyze=text)
-    data = {
-        "inputs": {"text_to_analyze": text},
-        "query": prompt,
-        "response_mode": "blocking",
-        "user": "andon_top2000_script",
-    }
-
-    try:
-        url = f"{DIFY_API_BASE.rstrip('/')}/completion-messages"
-        response = requests.post(
-            url,
-            headers=headers,
-            json=data,
-            timeout=120,
-            verify=DIFY_VERIFY_SSL,
-        )
-        if response.status_code == 404:
-            url = f"{DIFY_API_BASE.rstrip('/')}/chat-messages"
-            response = requests.post(
-                url,
-                headers=headers,
-                json=data,
-                timeout=120,
-                verify=DIFY_VERIFY_SSL,
-            )
-        response.raise_for_status()
-        result = response.json()
-        llm_output = (
-            result.get("answer")
-            or result.get("text")
-            or (result.get("data") or {}).get("outputs", {}).get("text")
-            or ""
-        )
-        if isinstance(llm_output, dict):
-            tags = llm_output
-        else:
-            tags = _parse_llm_json(str(llm_output))
-        return {
-            "action_category": tags.get("action_category", "其他") or "其他",
-            "extracted_parts": tags.get("extracted_parts", "") or "",
-            "is_reset_only": bool(tags.get("is_reset_only", False)),
-            "extracted_fault_reason": tags.get("extracted_fault_reason", "") or "",
-        }
-    except Exception as e:
-        print(f"Error calling Dify API for text: {text[:50]}... Error: {e}")
-        return dict(DEFAULT_TAGS)
-
-
-def build_full_reaction_text(df: pd.DataFrame) -> pd.Series:
-    text_cols = [
-        c
-        for c in ["reactionplan", "actions", "remark", "changedesc", "changeeventdesc"]
-        if c in df.columns
-    ]
-
-    def _join(row) -> str:
-        parts = []
-        for col in text_cols:
-            val = row.get(col)
-            if pd.notna(val) and str(val).strip():
-                parts.append(str(val).strip())
-        return " ".join(parts)
-
-    series = df.apply(_join, axis=1).str.strip()
-    return series.replace("", pd.NA)
 
 
 def _is_tagged(row: pd.Series) -> bool:
@@ -169,6 +47,9 @@ def run_top2000(cleaned_csv: Path = TEMP_CSV_PATH) -> pd.DataFrame:
             f"找不到清洗文件: {cleaned_csv}\n请先运行: python prepare_andon_data.py"
         )
 
+    if not DIFY_API_KEY or DIFY_API_KEY == "YOUR_DIFY_APP_API_KEY":
+        raise RuntimeError("请先在 dify_config.py 中配置 DIFY_API_KEY")
+
     if OUTPUT_CSV.exists():
         print(f"发现进度文件，继续: {OUTPUT_CSV}")
         work = pd.read_csv(OUTPUT_CSV)
@@ -177,7 +58,7 @@ def run_top2000(cleaned_csv: Path = TEMP_CSV_PATH) -> pd.DataFrame:
         df = pd.read_csv(cleaned_csv)
         df.columns = [str(c).lower() for c in df.columns]
         work = df.head(TOP_N).copy().reset_index(drop=True)
-        work["full_reaction_text"] = build_full_reaction_text(work)
+        work["full_reaction_text"] = tagger.build_full_reaction_text(work)
         for col in TAG_COLS:
             if col not in work.columns:
                 work[col] = pd.NA
@@ -195,7 +76,8 @@ def run_top2000(cleaned_csv: Path = TEMP_CSV_PATH) -> pd.DataFrame:
     try:
         for n, i in enumerate(pending_idx, start=1):
             print(f"Processing {n}/{len(pending_idx)} (row {i + 1}/{total})...")
-            tags = call_dify_for_tagging(work.at[i, "full_reaction_text"])
+            # 真正调用 llm_tag_andon_data.call_dify_for_tagging（内部读 dify_config）
+            tags = tagger.call_dify_for_tagging(work.at[i, "full_reaction_text"])
             for k, v in tags.items():
                 work.at[i, k] = v
             done_since_save += 1
@@ -216,8 +98,11 @@ def run_top2000(cleaned_csv: Path = TEMP_CSV_PATH) -> pd.DataFrame:
 
 if __name__ == "__main__":
     print("=" * 60)
+    print("配置来源: dify_config.py（两脚本共用）")
     print(f"Dify URL : {DIFY_API_BASE}")
     print(f"Verify SSL: {DIFY_VERIFY_SSL}")
+    key_preview = (DIFY_API_KEY[:8] + "***") if DIFY_API_KEY else "(空)"
+    print(f"API Key  : {key_preview}")
     print(f"TOP_N    : {TOP_N}")
     print("=" * 60)
 

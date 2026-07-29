@@ -17,17 +17,24 @@ python prepare_andon_data.py
 
 ## 3. LLM 语义标签化（需 Dify API Key）
 
-先在 `llm_tag_andon_data.py` 填写 `DIFY_API_KEY` / `DIFY_API_BASE`。
+**只改一个配置文件：** `dify_config.py`
 
-**只跑前 2000 条（推荐，可暂停续跑）：**
+```python
+DIFY_API_KEY = "app-你的真实key"
+DIFY_API_BASE = "https://gongsi.com/v1"
+DIFY_VERIFY_SSL = False
+```
+
+`llm_tag_andon_data.py` 与 `llm_tag_andon_top2000.py` **都读取这份配置**。
+
+**只跑前 2000 条（可暂停续跑）：**
 
 ```bat
 python llm_tag_andon_top2000.py
 ```
 
 - 输出：`factory_andon_data_top2000.csv`
-- 每 20 条自动保存；Ctrl+C 也会保存
-- 再运行会从断点继续
+- 每 20 条自动保存；Ctrl+C 也会保存并续跑
 
 **全量：**
 
