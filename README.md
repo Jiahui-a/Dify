@@ -17,25 +17,20 @@ python prepare_andon_data.py
 
 ## 3. LLM 语义标签化（需 Dify API Key）
 
-1. 在 Dify 创建 **文本生成 / Completion** 应用（或 Chat 应用）
-2. 打开 `llm_tag_andon_data.py`，填写：
-   - `DIFY_API_KEY`
-   - `DIFY_API_BASE`（云端默认 `https://cloud.dify.ai/v1`，自建改成你的地址）
-3. 建议先设 `MAX_ROWS = 5` 试跑，再改回 `None` 全量
+先在 `llm_tag_andon_data.py` 填写 `DIFY_API_KEY` / `DIFY_API_BASE`。
+
+**只跑前 2000 条（推荐，可暂停续跑）：**
+
+```bat
+python llm_tag_andon_top2000.py
+```
+
+- 输出：`factory_andon_data_top2000.csv`
+- 每 20 条自动保存；Ctrl+C 也会保存
+- 再运行会从断点继续
+
+**全量：**
 
 ```bat
 python llm_tag_andon_data.py
 ```
-
-会先清洗，再逐条调用 Dify，写出带标签的：
-
-`factory_andon_data.csv`
-
-新增列：
-- `action_category`
-- `extracted_parts`
-- `is_reset_only`
-- `extracted_fault_reason`
-- `full_reaction_text`
-
-> 有 API 成本与限速；大量数据请分批或只跑增量。
