@@ -1,7 +1,11 @@
 """
 第一步：获取安灯原始数据
-模仿可运行脚本：OData API + API Key + InsecureHTTPSAdapter + 禁用代理
-拉取原始事件后保存 JSON/CSV（不做清洗、不做知识库）
+按可运行脚本写法：InsecureHTTPSAdapter + 禁用代理 + OData
+
+当前环境（来自你的报错日志）：
+  地址: https://wujlinvma016.apac.bosch.com:8092/andon
+  实体: o_d_andon_eventsrawdata_cur
+  鉴权头: X-Api-Key
 """
 
 from __future__ import annotations
@@ -20,13 +24,11 @@ import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.poolmanager import PoolManager
 
-# 内网自签证书时关闭校验会触发警告，此处静默
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 禁用代理，防止内网请求走公司外网代理
 NO_PROXY = {"http": None, "https": None}
 
-# 第一步核心字段
 CORE_FIELDS = [
     "linename",
     "stationname",
@@ -54,22 +56,20 @@ CORE_FIELDS = [
 ]
 
 
-# ========== 配置类 ==========
 @dataclass
 class ApiConfig:
     """API 配置"""
 
-    base_url: str = "https://gongsi.com:8092/andon"
+    base_url: str = "https://wujlinvma016.apac.bosch.com:8092/andon"
     endpoint: str = "o_d_andon_eventsrawdata_cur"
-    api_key: str = "API_KEY"
-    auth_header: str = "gongsi-Key"
+    api_key: str = "在这里填入有效的API_KEY"
+    auth_header: str = "X-Api-Key"
     user_agent: str = "Mozilla/5.0"
     verify_ssl: bool = False
     timeout_seconds: int = 120
     top_n: int = 2000
 
 
-# ========== SSL 适配器 ==========
 class InsecureHTTPSAdapter(HTTPAdapter):
     def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -84,7 +84,6 @@ class InsecureHTTPSAdapter(HTTPAdapter):
         )
 
 
-# ========== 辅助函数 ==========
 def _build_headers(config: ApiConfig) -> dict[str, str]:
     headers = {
         "Accept": "*/*",
@@ -103,7 +102,6 @@ def _create_session(config: ApiConfig) -> requests.Session:
 
 
 def _fetch_json(config: ApiConfig, url: str) -> dict[str, Any]:
-    """发送 HTTP 请求并解析 JSON"""
     session = _create_session(config)
     try:
         response = session.get(
@@ -113,6 +111,19 @@ def _fetch_json(config: ApiConfig, url: str) -> dict[str, Any]:
             proxies=NO_PROXY,
             timeout=config.timeout_seconds,
         )
+        if response.status_code == 401:
+            detail = ""
+            try:
+                detail = response.json().get("message", response.text[:300])
+            except Exception:
+                detail = response.text[:300]
+            raise PermissionError(
+                "401 Unauthorized：API Key 无效、过期或已吊销。\n"
+                f"服务器返回: {detail}\n"
+                f"当前鉴权头: {config.auth_header}\n"
+                f"当前 Key 前缀: {config.api_key[:4]}***（共 {len(config.api_key)} 位）\n"
+                "请向接口管理员申请有效 Key，并改 ApiConfig.api_key 后再跑。"
+            )
         response.raise_for_status()
         return response.json()
     finally:
@@ -120,7 +131,6 @@ def _fetch_json(config: ApiConfig, url: str) -> dict[str, Any]:
 
 
 def extract_records(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """从 OData 响应中提取记录列表"""
     if "value" in payload and isinstance(payload["value"], list):
         return payload["value"]
     if isinstance(payload, list):
@@ -128,9 +138,8 @@ def extract_records(payload: dict[str, Any]) -> list[dict[str, Any]]:
     raise ValueError("Unexpected API payload shape: expected OData `value` array.")
 
 
-# ========== 核心拉取函数 ==========
 def fetch_latest_events(config: ApiConfig) -> list[dict[str, Any]]:
-    """拉取最新 N 条安灯事件数据"""
+    """拉取最新 N 条安灯事件数据（与可运行脚本一致，不带 $select）。"""
     params = {
         "$top": str(config.top_n),
         "$orderby": "begintime desc",
@@ -140,6 +149,10 @@ def fetch_latest_events(config: ApiConfig) -> list[dict[str, Any]]:
     query_string = "&".join([f"{k}={v}" for k, v in params.items()])
     url = f"{base_url}?{query_string}"
 
+    print(f"[fetch] 存储方式: OData API（API Key）")
+    print(f"[fetch] 地址: {config.base_url}")
+    print(f"[fetch] 表/实体: {config.endpoint}")
+    print(f"[fetch] 鉴权头: {config.auth_header}")
     print(f"[fetch] 请求: {url}")
     print(f"[fetch] 拉取最新 {config.top_n} 条数据")
 
@@ -148,6 +161,8 @@ def fetch_latest_events(config: ApiConfig) -> list[dict[str, Any]]:
         records = extract_records(payload)
         print(f"[fetch] 共拉取 {len(records)} 条安灯事件记录")
         return records
+    except PermissionError:
+        raise
     except requests.exceptions.HTTPError as e:
         print(f"[fetch] HTTP 错误: {e}")
         if hasattr(e, "response") and e.response is not None:
@@ -187,18 +202,17 @@ def save_raw(records: list[dict[str, Any]], output_dir: Path) -> None:
     print(f"[save] 核心字段 CSV : {core_csv}")
 
 
-# ========== 主函数 ==========
 def main() -> None:
     print("=" * 60)
     print("第一步：获取安灯原始数据")
     print("=" * 60)
 
-    # ===== 请修改以下配置（与你的可运行脚本一致）=====
+    # ===== 请修改：填入有效的 API Key =====
     api_config = ApiConfig(
-        base_url="https://gongsi.com:8092/andon",
+        base_url="https://wujlinvma016.apac.bosch.com:8092/andon",
         endpoint="o_d_andon_eventsrawdata_cur",
-        api_key="api-key3",
-        auth_header="gongsi-Key",
+        api_key="在这里填入有效的API_KEY",  # ← 必须换成有效 Key；401 就是这里不对
+        auth_header="X-Api-Key",
         user_agent="Mozilla/5.0",
         verify_ssl=False,
         timeout_seconds=120,
@@ -206,18 +220,22 @@ def main() -> None:
     )
     # ===== 配置结束 =====
 
-    # 输出目录：默认写到本脚本同级 data/raw
+    if api_config.api_key in {"在这里填入有效的API_KEY", "API_KEY", "api-key3", ""}:
+        print(
+            "\n请先在 fetch_andon_raw.py 的 ApiConfig.api_key 填入有效密钥。\n"
+            "服务器已明确返回: API Key is not valid or is expired / revoked.\n"
+            "占位符 / 过期 Key 会导致 401，与代码路径无关。"
+        )
+        return
+
     output_dir = Path(__file__).resolve().parent / "data" / "raw"
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         raw_records = fetch_latest_events(api_config)
-
         if not raw_records:
             print("\n未拉取到任何数据")
             return
 
-        # 打印字段，便于核对核心字段
         sample = raw_records[0]
         print("\n[probe] 样例字段名:")
         for key in sample.keys():
@@ -230,11 +248,9 @@ def main() -> None:
             print("[probe] 缺失核心字段: " + ", ".join(missing))
 
         save_raw(raw_records, output_dir)
-
         print("\n" + "=" * 60)
         print(f"完成：共 {len(raw_records)} 条原始数据 -> {output_dir}")
         print("=" * 60)
-
     except Exception as e:
         print(f"\n失败: {e}")
         import traceback
